@@ -1,0 +1,19 @@
+# Build outputs
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+TestResults/
+
+# IDE and user state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+
+# Local project notes and personal game data
+plan.md
+*.save
+*.meta
+SaveEditorBackups/

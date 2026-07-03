@@ -1,0 +1,86 @@
+name: Build, test, and release
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-package:
+    name: Build, test, and package (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore DataCenterSaveEditor.slnx
+
+      - name: Build
+        run: dotnet build DataCenterSaveEditor.slnx --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet run --project tests/DataCenterSaveEditor.Tests/DataCenterSaveEditor.Tests.csproj --configuration Release --no-build --no-restore
+
+      - name: Publish self-contained application
+        run: >-
+          dotnet publish src/DataCenterSaveEditor.App/DataCenterSaveEditor.App.csproj
+          --configuration Release
+          --runtime win-x64
+          --self-contained true
+          --no-restore
+          --output artifacts/publish
+
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          Copy-Item README.md artifacts/publish/README.md
+          Compress-Archive -Path artifacts/publish/* -DestinationPath artifacts/DataCenterSaveEditor-win-x64.zip -CompressionLevel Optimal
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: DataCenterSaveEditor-win-x64
+          path: artifacts/DataCenterSaveEditor-win-x64.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-test-package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download portable build
+        uses: actions/download-artifact@v4
+        with:
+          name: DataCenterSaveEditor-win-x64
+          path: dist
+
+      - name: Create release from tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "${GITHUB_REF_NAME}"
+          dist/DataCenterSaveEditor-win-x64.zip
+          --repo "${GITHUB_REPOSITORY}"
+          --verify-tag
+          --generate-notes
+          --title "Data Center Save Editor ${GITHUB_REF_NAME}"

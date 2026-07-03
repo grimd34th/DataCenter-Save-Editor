@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/DataCenterSaveEditor.Core/DataCenterSaveEditor.Core.csproj" />
+  <Project Path="src/DataCenterSaveEditor.App/DataCenterSaveEditor.App.csproj" />
+  <Project Path="tests/DataCenterSaveEditor.Tests/DataCenterSaveEditor.Tests.csproj" />
+</Solution>
