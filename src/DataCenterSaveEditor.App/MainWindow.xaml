@@ -52,7 +52,7 @@
             </StackPanel>
 
             <TabControl Grid.Row="1">
-                <TabItem Header="Common fields">
+                <TabItem Header="Player data">
                     <DataGrid ItemsSource="{Binding CommonFields}" AutoGenerateColumns="False" CanUserAddRows="False"
                               CanUserDeleteRows="False" HeadersVisibility="Column" GridLinesVisibility="Horizontal"
                               RowHeaderWidth="0" Margin="8" IsReadOnly="False">

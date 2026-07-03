@@ -11,7 +11,6 @@ namespace DataCenterSaveEditor.App.ViewModels;
 
 internal sealed class MainViewModel : ObservableObject
 {
-    private static readonly string[] PositionTerms = ["position", "rotation", "quaternion", "scale"];
     private readonly SaveCommitService _commitService = new();
     private readonly Dictionary<string, ScalarFieldViewModel> _commonByNodeId = new(StringComparer.Ordinal);
     private SavePair? _selectedPair;
@@ -191,22 +190,51 @@ internal sealed class MainViewModel : ObservableObject
         _commonByNodeId.Clear();
         if (Document is null) return;
 
+        NrbfDocument binary = Document.Binary;
+        SaveNode? playerMember = binary.Root.Children.FirstOrDefault(node => node.Name == "playerData");
+        SaveNode? playerData = ResolveMember(binary, playerMember);
+        if (playerData is null) return;
+
         List<(SaveNode Node, string Label, int Rank)> fields = [];
-        foreach (SaveNode node in Document.Binary.Root.Children.Where(node => node.Kind == SaveNodeKind.Scalar))
+        foreach (SaveNode node in playerData.Children.Where(node => node.Kind == SaveNodeKind.Scalar))
         {
-            fields.Add((node, FriendlyName(node.Name), CommonRank(node.Name)));
+            fields.Add((node, FriendlyName(node.Name), PlayerFieldRank(node.Name)));
         }
 
-        foreach (SaveNode member in Document.Binary.Root.Children.Where(node =>
-                     PositionTerms.Any(term => node.Name.Contains(term, StringComparison.OrdinalIgnoreCase))))
+        SaveNode? positionMember = playerData.Children.FirstOrDefault(node => node.Name == "position");
+        SaveNode? position = ResolveMember(binary, positionMember);
+        if (position is not null)
         {
-            SaveNode? target = member.Kind == SaveNodeKind.Reference && member.ReferencedObjectId is int id
-                ? Document.Binary.FindObjectById(id)
-                : member;
-            if (target is null) continue;
-            foreach (SaveNode component in target.Children.Where(node => node.Kind == SaveNodeKind.Scalar))
+            string[] axes = ["X", "Y", "Z"];
+            int index = 0;
+            foreach (SaveNode component in position.Children.Where(node => node.Kind == SaveNodeKind.Scalar))
             {
-                fields.Add((component, $"{FriendlyName(member.Name)} {component.Name.ToUpperInvariant()}", 50));
+                string suffix = index < axes.Length ? axes[index] : (index + 1).ToString();
+                fields.Add((component, $"Position {suffix}", 10 + index));
+                index++;
+            }
+        }
+
+        SaveNode? objectivesMember = playerData.Children.FirstOrDefault(node => node.Name == "activeObjectives");
+        SaveNode? objectives = ResolveMember(binary, objectivesMember);
+        if (objectives is not null)
+        {
+            SaveNode? sizeNode = objectives.Children.FirstOrDefault(node => node.Name == "_size" && node.Kind == SaveNodeKind.Scalar);
+            int size = 0;
+            _ = int.TryParse(sizeNode?.Value, out size);
+            SaveNode? itemsMember = objectives.Children.FirstOrDefault(node => node.Name == "_items");
+            SaveNode? items = ResolveMember(binary, itemsMember);
+            if (items is not null)
+            {
+                int count = Math.Clamp(size, 0, items.Children.Count);
+                for (int index = 0; index < count; index++)
+                {
+                    SaveNode item = items.Children[index];
+                    if (item.Kind == SaveNodeKind.Scalar)
+                    {
+                        fields.Add((item, $"Active Objective {index + 1}", 20 + index));
+                    }
+                }
             }
         }
 
@@ -219,6 +247,16 @@ internal sealed class MainViewModel : ObservableObject
             CommonFields.Add(viewModel);
             _commonByNodeId[node.NodeId] = viewModel;
         }
+    }
+
+    private static SaveNode? ResolveMember(NrbfDocument document, SaveNode? member)
+    {
+        if (member?.Kind == SaveNodeKind.Reference && member.ReferencedObjectId is int objectId)
+        {
+            return document.FindObjectById(objectId);
+        }
+
+        return member;
     }
 
     private void RebuildAdvancedTree()
@@ -332,16 +370,12 @@ internal sealed class MainViewModel : ObservableObject
         return null;
     }
 
-    private static int CommonRank(string name) => name switch
+    private static int PlayerFieldRank(string name) => name switch
     {
-        "nameOfSave" => 0,
-        "version" => 1,
-        "coins" => 2,
-        "reputation" => 3,
-        _ when name.Contains("objective", StringComparison.OrdinalIgnoreCase) => 10,
-        _ when name.Contains("unlock", StringComparison.OrdinalIgnoreCase) => 20,
-        _ when name.Contains("command", StringComparison.OrdinalIgnoreCase) => 30,
-        _ => 40
+        "coins" => 0,
+        "xp" => 1,
+        "reputation" => 2,
+        _ => 5
     };
 
     private static string FriendlyName(string value)
