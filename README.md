@@ -72,14 +72,3 @@ dotnet publish src/DataCenterSaveEditor.App/DataCenterSaveEditor.App.csproj `
 ```
 
 The dependency-free test executable uses synthetic NRBF fixtures. Set `DATACENTER_TEST_SAVE` to an external version-8 `.save` path to additionally run the conditional real-save integration test; that file remains outside the repository.
-
-## GitHub Actions and releases
-
-`.github/workflows/build-test-release.yml` builds, tests, publishes, and uploads the portable ZIP on every push and pull request.
-
-Pushing a tag beginning with `v` also creates a GitHub Release with generated release notes and attaches the ZIP:
-
-```powershell
-git tag v0.1.0
-git push origin v0.1.0
-```
