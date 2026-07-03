@@ -8,6 +8,7 @@ public sealed class SaveDocument
     public const int SupportedVersion = 8;
 
     private readonly string _originalMetadataName;
+    private readonly SaveNode? _nameMember;
     private readonly SaveNode? _nameNode;
     private readonly SaveNode? _versionNode;
     private string _metadataName;
@@ -19,7 +20,8 @@ public sealed class SaveDocument
         MetadataVersion = metadata.Version;
         _metadataName = metadata.NameOfSave ?? string.Empty;
         _originalMetadataName = _metadataName;
-        _nameNode = binary.Root.Children.FirstOrDefault(node => node.Name == "nameOfSave" && node.Kind == SaveNodeKind.Scalar);
+        _nameMember = binary.Root.Children.FirstOrDefault(node => node.Name == "nameOfSave");
+        _nameNode = ResolveStringMember(binary, _nameMember);
         _versionNode = binary.Root.Children.FirstOrDefault(node => node.Name == "version" && node.Kind == SaveNodeKind.Scalar);
     }
 
@@ -69,7 +71,9 @@ public sealed class SaveDocument
     {
         if (_nameNode is null)
         {
-            return ScalarEditResult.Failure("The SaveData root does not contain an editable nameOfSave field.");
+            return ScalarEditResult.Failure(_nameMember?.Kind == SaveNodeKind.Null
+                ? "This autosave stores nameOfSave as null; its metadata name is preserved but cannot be edited."
+                : "The SaveData root does not contain an editable nameOfSave field.");
         }
 
         return TrySetScalar(_nameNode.NodeId, value);
@@ -95,6 +99,18 @@ public sealed class SaveDocument
     public byte[] CreateSaveBytes() => Binary.ToArray();
     public byte[] CreateMetadataBytes() => SaveMetadataSerializer.Serialize(Metadata);
     public IReadOnlyList<ValidationIssue> Validate() => SaveValidator.Validate(this);
+
+    private static SaveNode? ResolveStringMember(NrbfDocument binary, SaveNode? member)
+    {
+        if (member?.Kind == SaveNodeKind.Scalar) return member;
+        if (member?.Kind == SaveNodeKind.Reference && member.ReferencedObjectId is int objectId)
+        {
+            SaveNode? target = binary.FindObjectById(objectId);
+            return target?.Kind == SaveNodeKind.Scalar ? target : null;
+        }
+
+        return null;
+    }
 
     internal IReadOnlyList<ValidationIssue> ValidateCore()
     {
@@ -127,9 +143,17 @@ public sealed class SaveDocument
             issues.Add(new ValidationIssue(ValidationSeverity.Error, $"Metadata version {MetadataVersion} is read-only; only version {SupportedVersion} can be written."));
         }
 
-        if (_nameNode?.ScalarType != ScalarType.String)
+        if (_nameMember is null)
         {
-            issues.Add(new ValidationIssue(ValidationSeverity.Error, "The SaveData root does not contain a valid string nameOfSave field.", _nameNode?.NodeId));
+            issues.Add(new ValidationIssue(ValidationSeverity.Error, "The SaveData root does not contain a nameOfSave field."));
+        }
+        else if (_nameMember.Kind == SaveNodeKind.Null)
+        {
+            // Data Center autosaves intentionally store a null binary name and keep their display name in .meta.
+        }
+        else if (_nameNode?.ScalarType != ScalarType.String)
+        {
+            issues.Add(new ValidationIssue(ValidationSeverity.Error, "The SaveData root contains an unsupported nameOfSave representation.", _nameMember.NodeId));
         }
         else if (!string.Equals(_nameNode.Value, _metadataName, StringComparison.Ordinal))
         {

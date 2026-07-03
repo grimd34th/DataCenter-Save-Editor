@@ -17,6 +17,7 @@ internal static class Program
             ("arrays, nulls, and references", TestArraysNullsAndReferences),
             ("malformed stream rejection", TestMalformedStream),
             ("metadata synchronization and version protection", TestMetadataSynchronization),
+            ("autosaves with null binary names remain writable", TestNullAutosaveName),
             ("unsupported versions are read-only", TestUnsupportedVersion),
             ("save discovery requires paired files", TestSaveDiscovery),
             ("successful commit creates a two-file backup", TestCommitAndBackup),
@@ -157,6 +158,29 @@ internal static class Program
         });
     }
 
+    private static void TestNullAutosaveName()
+    {
+        WithSavePair(8, "name", (pair, _) =>
+        {
+            SaveDocument document = SaveDocument.Load(pair);
+            SaveNode nameMember = document.Binary.Root.Children.Single(node => node.Name == "nameOfSave");
+            Equal(SaveNodeKind.Null, nameMember.Kind);
+            True(document.CanWrite, "A game-produced autosave with a null binary name was not writable.");
+            True(!document.TrySetName("renamed").Success, "A null autosave name was structurally replaced.");
+
+            Set(document, "$.coins", "25");
+            SaveCommitResult result = new SaveCommitService(() => false).Commit(document, warningsConfirmed: true);
+            True(result.Success, result.Message ?? "Autosave commit failed.");
+
+            SaveDocument reloaded = SaveDocument.Load(pair);
+            SaveNode reloadedName = reloaded.Binary.Root.Children.Single(node => node.Name == "nameOfSave");
+            Equal(SaveNodeKind.Null, reloadedName.Kind);
+            Equal("name", reloaded.Name);
+            Equal("25", RequiredNode(reloaded.Binary, "$.coins").Value);
+            True(reloaded.CanWrite, "The committed autosave did not validate.");
+        }, binaryName: null);
+    }
+
     private static void TestUnsupportedVersion()
     {
         WithSavePair(9, "Original", (pair, _) =>
@@ -257,15 +281,23 @@ internal static class Program
         Equal("SaveData", document.Root.SerializedType);
         True(input.AsSpan().SequenceEqual(document.ToArray()), "Real save no-op output was not byte-identical.");
         True(document.ScalarNodes.Any(node => node.Path == "$.coins"), "Real save did not expose coins.");
+
+        SavePair pair = SavePair.FromSavePath(path);
+        if (File.Exists(pair.MetaPath))
+        {
+            SaveDocument saveDocument = SaveDocument.Load(pair);
+            True(saveDocument.CanWrite, string.Join(" ", saveDocument.Validate().Select(issue => issue.Message)));
+            True(input.AsSpan().SequenceEqual(saveDocument.CreateSaveBytes()), "SaveDocument changed the real save without edits.");
+        }
     }
 
-    private static void WithSavePair(int version, string name, Action<SavePair, string> action)
+    private static void WithSavePair(int version, string name, Action<SavePair, string> action, string? binaryName = "Original")
     {
         string directory = NewTemporaryDirectory();
         try
         {
             SavePair pair = new("test", Path.Combine(directory, "test.save"), Path.Combine(directory, "test.meta"));
-            byte[] save = SyntheticNrbf.CreateScalarSave();
+            byte[] save = SyntheticNrbf.CreateScalarSave(binaryName);
             if (version != 8)
             {
                 NrbfDocument document = NrbfDocument.Parse(save);
@@ -332,7 +364,7 @@ internal static class Program
 
 internal static class SyntheticNrbf
 {
-    public static byte[] CreateScalarSave()
+    public static byte[] CreateScalarSave(string? saveName = "Original")
     {
         using MemoryStream stream = new();
         using BinaryWriter writer = new(stream, Encoding.UTF8, leaveOpen: true);
@@ -349,9 +381,16 @@ internal static class SyntheticNrbf
             classTypes: [null, null, null, null, null, "GameMode", "UnityEngine.Vector3"]);
 
         writer.Write(8);
-        writer.Write((byte)6);
-        writer.Write(2);
-        writer.Write("Original");
+        if (saveName is null)
+        {
+            writer.Write((byte)10);
+        }
+        else
+        {
+            writer.Write((byte)6);
+            writer.Write(2);
+            writer.Write(saveName);
+        }
         writer.Write(12.5f);
         writer.Write(93f);
         writer.Write(true);
